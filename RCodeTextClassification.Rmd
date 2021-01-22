@@ -5,7 +5,10 @@ date: "12/18/2020"
 output: pdf_document
 ---
 
-## Note: This document gives step by step process of getting articles from different sections in the Guardian newspaper using JSON library and API, extract the words from those sections, using feature reduction by removing highly correlated words, then using Naive Bayes Classification to allocate words in respective sections, and finally checking the model accuracy and precision in predicting correct classification.
+## Note: This document gives step by step process of getting articles from different sections in the Guardian newspaper
+using JSON library and API, extract the words from those sections, using feature reduction by removing highly correlated words,
+then using Naive Bayes Classification to classify words in respective sections, and finally checking the model accuracy and precision
+in predicting correct classification.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
