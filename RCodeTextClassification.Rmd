@@ -1,0 +1,188 @@
+---
+title: "Text Mining and Naive Bayes Classification in R"
+author: "Ashutosh Kumar"
+date: "12/18/2020"
+output: pdf_document
+---
+
+## Note: This document gives step by step process of getting articles from different sections in the Guardian newspaper using JSON library and API, extract the words from those sections, using feature reduction by removing highly correlated words, then using Naive Bayes Classification to allocate words in respective sections, and finally checking the model accuracy and precision in predicting correct classification.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r echo=TRUE}
+library(GuardianR)
+require("httr")
+require("jsonlite")
+require(RJSONIO)
+require(RCurl)
+library(dplyr)
+library(tidyr)
+library(NLP)
+library(tm)
+library(SnowballC)
+library(e1071)
+library(ggplot2)
+library(ggthemes)
+library(caret)
+library(data.table)
+library(klaR)
+
+npdata1 = get_guardian("state", 
+	section="world",
+	from.date="2019-05-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata2 = get_guardian("economy+health+job+world+state+science+cash+market", 
+	section="business",
+	from.date="2018-05-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata3 = get_guardian("new+development+invent+recent+economy+job+world+state+science+cash+market+state",
+	section="science",
+	from.date="2015-06-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata4 = get_guardian("state+disease+sick+health+budget+care+job+state+cash+insurance+market", 
+	section="education",
+	from.date="2014-01-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata5 = get_guardian("state+world+religion+art+desing+people+war+attack", 
+	section="politics",
+	from.date="2014-06-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata6 = get_guardian("state+culture+people+art+fashion+", 
+	section="society",
+	from.date="2015-02-27", 
+	to.date="2019-10-27", 
+	api.key="f3b23eb7-b9de-4846-aa16-c54ecb4ff6ef")
+
+npdata1n = select(npdata1,id,webTitle,body,wordcount,sectionName)
+npdata2n = select(npdata2,id,webTitle,body,wordcount,sectionName)
+npdata3n = select(npdata3,id,webTitle,body,wordcount,sectionName)
+npdata4n = select(npdata4,id,webTitle,body,wordcount,sectionName)
+npdata5n = select(npdata5,id,webTitle,body,wordcount,sectionName)
+npdata6n = select(npdata6,id,webTitle,body,wordcount,sectionName)
+
+#Summary of each dataset from separate sections
+#str(npdata1n)
+#str(npdata2n)
+#str(npdata3n)
+#str(npdata4n)
+#str(npdata5n)
+#str(npdata6n)
+
+# Joining all dataframes into one data frame
+df=rbind(npdata1n, npdata2n, npdata3n, npdata4n, npdata5n, npdata6n)
+
+# Converted body variable into character
+df[, ] <- lapply(df[, ], as.character)
+class(df$body)
+str(df)
+# attributes(df)
+
+# Now cleaning the text in articles stroed in body variable
+
+df$body = gsub('<.*?>','', df$body) # removes html contents
+df$body = gsub("[^0-9A-Za-z///' ]","'" , df$body ,ignore.case = TRUE) # removes non-alphanumeric
+df$body = gsub("''","" , df$body ,ignore.case = TRUE) # removes extra apostrophe
+
+# Tokenization
+# Getting a corpus from finalized dataframe
+df_corpus = Corpus(VectorSource(df$body))
+
+# Examine df_corpus
+df_corpus
+
+#df_corpus[[1]]$content
+df_corpus=tm_map(df_corpus, removeWords, stopwords("english"))
+df_corpus=tm_map(df_corpus, tolower)
+df_corpus=tm_map(df_corpus, content_transformer(stripWhitespace))
+df_corpus=tm_map(df_corpus, content_transformer(removePunctuation))
+df_corpus=tm_map(df_corpus, content_transformer(removeNumbers))
+
+df_corpus=tm_map(df_corpus,content_transformer(stemDocument), language = "english")
+#df_corpus[[1]]$content
+
+# Creating Document Term Matrix
+doc_dtm<-DocumentTermMatrix(df_corpus, control = list(wordLengths = c(2, Inf)))
+
+# inspect(doc_dtm)
+#findFreqTerms(doc_dtm, lowfreq = 2)
+# Removing sparse terms
+doc_dtm = removeSparseTerms(doc_dtm, 0.99)
+dim(doc_dtm)
+docmatrix = as.matrix(doc_dtm)
+
+# Getting correlation of the matrix
+
+colS <- colSums(docmatrix)
+length(colS)
+doc_features <- data.table(name = attributes(colS)$names, count = colS)
+
+#most frequent and least frequent words
+doc_features[order(-count)][1:10] #top 10 most frequent words
+doc_features[order(count)][1:10] #least 10 frequent words
+
+# Plotting some correlated features
+ggplot(doc_features[count>20000],aes(name, count))+geom_bar(stat = "identity",fill='lightblue',color='black')+ theme(axis.text.x = element_text(angle = 45, hjust = 1))+ theme_economist()+scale_color_economist()
+
+#check association of terms of top features
+findAssocs(doc_dtm,"said",corlimit = 0.8)
+findAssocs(doc_dtm,"will",corlimit = 0.8)
+
+# Combining two datasets: matrix from the cleaned data in above part and section name from original dataframe
+processed_data <- as.data.table(docmatrix)
+mydata = cbind(data.table(section_name = df$sectionName),processed_data)
+
+## Oops. I created data table 'mydata', but now converting in dataframe to work and remove correlated terms.
+datanew = as.data.frame(mydata)
+correlationMatrix = cor(datanew[,2:4138])
+highlyCorrelated = findCorrelation(correlationMatrix, cutoff=0.8)
+print(highlyCorrelated)
+datanew = datanew[-c(highlyCorrelated)]
+# Feature Reduction: Got rid of features which were correlated more than 80 percent
+
+#head(datanew)
+
+# Classification
+
+#Dividing training and test in 80:20
+set.seed(123)
+trainIndex=createDataPartition(datanew$section_name, p=0.8)$Resample1
+train=datanew[trainIndex, ]
+test=datanew[-trainIndex, ]
+
+## check the balance of each test and train
+print(table(datanew$section_name))
+print(table(train$section_name))
+print(table(test$section_name))
+
+# But train and test were not as factors - convert them as factors
+train[, ] <- lapply(train[, ], as.factor)
+test[, ] <- lapply(test[, ], as.factor)
+
+levels(train$section_name) # And we got 6 levels, Yay!
+
+# Now using Naive Bayes on the train and test data
+NBclassfier=naiveBayes(section_name~., data=train)
+
+# Confusion Matrix with full details about recall and precision from Training Data
+trainPred=predict(NBclassfier, newdata = train, type = "class")
+tab_train = table(trainPred, train$section_name)
+caret::confusionMatrix(tab_train)
+
+# Confusion Matrix with full details about recall and precision from Test Data
+testPred=predict(NBclassfier, newdata=test, type="class")
+tab_test = table(testPred, test$section_name)
+caret::confusionMatrix(tab_test)
+
+# Training data gave accuracy of around 87% and test data of 80.2%. Thats pretty decent!
+```
